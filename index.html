@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>トレーニング記録</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body style="margin:0;background:#ebebeb;">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const EXERCISES = [
+  ['a', 'ラットプルダウン'],
+  ['b', 'シーテッドロウ'],
+  ['c', 'リアデルトフライ'],
+  ['e', 'ペクトルフライ'],
+  ['d', 'チェストプレス'],
+  ['f', 'アドミラルクランチ'],
+  ['g', 'ヒップ内転'],
+  ['h', 'ヒップ外転'],
+  ['i', 'レッグカール'],
+  ['j', 'レッグプレス'],
+  ['k', 'レッグエクステンション'],
+];
+
+const EX_COLORS = [
+  '#e74c3c','#e67e22','#f1c40f','#2ecc71','#1abc9c',
+  '#3498db','#9b59b6','#e91e63','#00bcd4','#8bc34a','#ff5722'
+];
+
+const STORAGE_KEY = 'training_data_v1';
+
+const initRow = () => ({ weight: '', reps: '', score: 0 });
+
+const loadFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+
+const saveToStorage = (data) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+};
+
+function TrainingApp() {
+  const [rows, setRows] = useState(() => Object.fromEntries(EXERCISES.map(([k]) => [k, initRow()])));
+  const [maxWeights, setMaxWeights] = useState(() => Object.fromEntries(EXERCISES.map(([k]) => [k, 0])));
+  const [totalScore, setTotalScore] = useState(0);
+  const [view, setView] = useState('main');
+  const [history, setHistory] = useState({});
+  const [toast, setToast] = useState('');
+  const [confirm, setConfirm] = useState(null);
+
+  const totalCanvasRef = useRef(null);
+  const exCanvasRef = useRef(null);
+  const totalChartRef = useRef(null);
+  const exChartRef = useRef(null);
+  const chartScriptLoaded = useRef(false);
+  const importFileRef = useRef(null);
+
+  useEffect(() => {
+    const data = loadFromStorage();
+    if (data) {
+      if (data.max_weights) setMaxWeights(data.max_weights);
+      if (data.history) setHistory(data.history);
+      showToast('データをロードしました');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === 'graph') {
+      if (window.Chart) { setTimeout(renderGraphs, 50); }
+      else if (!chartScriptLoaded.current) {
+        chartScriptLoaded.current = true;
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+        s.onload = () => setTimeout(renderGraphs, 50);
+        document.head.appendChild(s);
+      }
+    }
+  }, [view, history]);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2500);
+  };
+
+  // ── 保存 ──
+  const saveData = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const newHistory = { ...history };
+    if (totalScore > 0) {
+      newHistory[today] = {
+        total: totalScore,
+        scores: EXERCISES.map(([k]) => rows[k].score),
+        maxes: EXERCISES.map(([k]) => maxWeights[k] || 0),
+      };
+    }
+    const data = { max_weights: maxWeights, history: newHistory };
+    saveToStorage(data);
+    setHistory(newHistory);
+    showToast(`${today} のデータを保存しました`);
+  };
+
+  // ── 計算 ──
+  const calculate = () => {
+    const newRows = { ...rows };
+    const newMax = { ...maxWeights };
+    let total = 0;
+    for (const [prefix] of EXERCISES) {
+      const weight = parseFloat(newRows[prefix].weight) || 0;
+      const reps = parseFloat(newRows[prefix].reps) || 0;
+      const curMax = newMax[prefix] || 0;
+      if (weight <= 0 || reps <= 0) { total += newRows[prefix].score; continue; }
+      const baseline = (curMax === 0 || weight > curMax) ? weight : curMax;
+      const added = Math.round(((weight * (1 + (reps / 30))) / (baseline * 3.9)) * 100 * 100) / 100;
+      const newScore = Math.round((newRows[prefix].score + added) * 100) / 100;
+      newRows[prefix] = { ...newRows[prefix], score: newScore };
+      total += newScore;
+      if (weight > curMax && reps >= 10) newMax[prefix] = weight;
+    }
+    for (const [prefix] of EXERCISES) newRows[prefix] = { ...newRows[prefix], reps: '' };
+    setRows(newRows);
+    setMaxWeights(newMax);
+    setTotalScore(Math.round(total * 10) / 10);
+  };
+
+  const fullReset = () => {
+    setRows(Object.fromEntries(EXERCISES.map(([k]) => [k, initRow()])));
+    setTotalScore(0);
+  };
+
+  const maxReset = () => {
+    const newMax = Object.fromEntries(EXERCISES.map(([k]) => [k, 0]));
+    const stored = loadFromStorage() || {};
+    saveToStorage({ ...stored, max_weights: newMax });
+    setMaxWeights(newMax);
+    showToast('MAX値をリセットしました');
+  };
+
+  const historyReset = () => {
+    const stored = loadFromStorage() || {};
+    saveToStorage({ ...stored, history: {} });
+    setHistory({});
+    [totalChartRef, exChartRef].forEach(r => { if (r.current) { r.current.destroy(); r.current = null; } });
+    showToast('履歴を削除しました');
+  };
+
+  // ── 履歴エクスポート ──
+  const exportHistory = () => {
+    const stored = loadFromStorage() || {};
+    const json = JSON.stringify(stored, null, 2);
+    const blob = new Blob([json], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const today = new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `training_backup_${today}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('履歴をエクスポートしました');
+  };
+
+  // ── 履歴インポート ──
+  const importHistory = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.history && !data.max_weights) throw new Error('形式が正しくありません');
+        if (data.max_weights) setMaxWeights(data.max_weights);
+        if (data.history) setHistory(data.history);
+        saveToStorage(data);
+        showToast(`${Object.keys(data.history || {}).length}件の履歴をインポートしました`);
+      } catch (err) {
+        showToast('インポートに失敗しました：' + err.message);
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  // ── グラフ描画 ──
+  const renderGraphs = () => {
+    if (!window.Chart) return;
+    const sorted = Object.keys(history).sort();
+    if (sorted.length === 0) return;
+
+    if (totalCanvasRef.current) {
+      if (totalChartRef.current) { totalChartRef.current.destroy(); totalChartRef.current = null; }
+      totalChartRef.current = new window.Chart(totalCanvasRef.current.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: sorted,
+          datasets: [{
+            label: '合計スコア',
+            data: sorted.map(d => history[d]?.total || 0),
+            borderColor: '#d9534f', backgroundColor: 'rgba(217,83,79,0.1)',
+            pointBackgroundColor: '#d9534f', borderWidth: 2, pointRadius: 4, tension: 0.3
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, title: { display: true, text: '合計スコア推移', font: { size: 13, weight: 'bold' } } },
+          scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { beginAtZero: false } }
+        }
+      });
+    }
+
+    if (exCanvasRef.current) {
+      if (exChartRef.current) { exChartRef.current.destroy(); exChartRef.current = null; }
+      const datasets = EXERCISES.map(([k, name], i) => ({
+        label: name,
+        data: sorted.map(d => history[d]?.scores?.[i] ?? null),
+        borderColor: EX_COLORS[i],
+        backgroundColor: EX_COLORS[i] + '22',
+        pointBackgroundColor: EX_COLORS[i],
+        borderWidth: 1.5, pointRadius: 3, tension: 0.3,
+      }));
+      exChartRef.current = new window.Chart(exCanvasRef.current.getContext('2d'), {
+        type: 'line',
+        data: { labels: sorted, datasets },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true, position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } },
+            title: { display: true, text: '種目別スコア推移', font: { size: 13, weight: 'bold' } }
+          },
+          scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { beginAtZero: false } }
+        }
+      });
+    }
+  };
+
+  const avgScore = Math.round((totalScore / EXERCISES.length) * 10) / 10;
+  const scoreColor = avgScore >= 100 ? '#27ae60' : '#d9534f';
+
+  const tabStyle = (v) => ({
+    padding: '7px 12px', fontSize: 12, fontWeight: view === v ? 600 : 400, cursor: 'pointer',
+    border: '1px solid #bbb', borderBottom: view === v ? '1px solid #fff' : '1px solid #bbb',
+    borderRadius: '6px 6px 0 0', background: view === v ? '#fff' : '#e0e0e0',
+    color: view === v ? '#222' : '#666', position: 'relative', top: 1, marginRight: 3,
+    zIndex: view === v ? 2 : 1, outline: 'none',
+  });
+
+  const sectionHead = (title) => (
+    <h3 style={{ fontSize: 13, fontWeight: 600, color: '#555', margin: '0 0 10px', borderBottom: '1px solid #ddd', paddingBottom: 6 }}>{title}</h3>
+  );
+
+  const hasHistory = Object.keys(history).length > 0;
+
+  return (
+    <div style={{ fontFamily: 'sans-serif', padding: '12px', maxWidth: 680, margin: '0 auto', background: '#ebebeb', minHeight: '100vh' }}>
+
+      {confirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 10, padding: '24px 28px', minWidth: 260, boxShadow: '0 4px 20px rgba(0,0,0,0.2)', textAlign: 'center' }}>
+            <p style={{ fontSize: 15, color: '#222', margin: '0 0 20px', fontWeight: 500 }}>{confirm.message}</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button onClick={() => { confirm.onYes(); setConfirm(null); }}
+                style={{ padding: '8px 28px', background: '#d9534f', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>はい</button>
+              <button onClick={() => setConfirm(null)}
+                style={{ padding: '8px 28px', background: '#f0f0f0', color: '#333', border: '1px solid #bbb', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>いいえ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ position: 'fixed', top: 16, right: 16, background: '#333', color: '#fff', padding: '8px 16px', borderRadius: 8, fontSize: 13, zIndex: 999 }}>{toast}</div>
+      )}
+
+      <h2 style={{ margin: '0 0 14px', fontSize: 18, fontWeight: 600, color: '#222' }}>トレーニング記録</h2>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', position: 'relative', zIndex: 1 }}>
+        {[['main','記録'],['graph','グラフ'],['option','オプション']].map(([v, label]) => (
+          <button key={v} onClick={() => setView(v)} style={tabStyle(v)}>{label}</button>
+        ))}
+      </div>
+
+      <div style={{ background: '#fff', border: '1px solid #bbb', borderRadius: '0 6px 6px 6px', padding: '14px 10px', position: 'relative', zIndex: 0 }}>
+
+        {/* ── 記録タブ ── */}
+        {view === 'main' && (
+          <>
+            <div style={{ overflowX: 'auto', borderRadius: 6, border: '1px solid #ccc' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: '34%' }} /><col style={{ width: '17%' }} /><col style={{ width: '13%' }} /><col style={{ width: '18%' }} /><col style={{ width: '18%' }} />
+                </colgroup>
+                <thead>
+                  <tr style={{ background: '#f5f5f5' }}>
+                    {[['種目','left','#444'],['重量(kg)','center','#444'],['回数','center','#444'],['スコア','center','#d9534f'],['MAX(kg)','center','#444']].map(([h,a,c],i) => (
+                      <th key={i} style={{ padding: '7px 6px', textAlign: a, fontWeight: 600, color: c, borderBottom: '2px solid #bbb', borderRight: i < 4 ? '1px solid #ccc' : 'none' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {EXERCISES.map(([prefix, name], idx) => (
+                    <tr key={prefix} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                      <td style={{ padding: '4px 6px', color: '#222', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd', fontWeight: 500, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</td>
+                      <td style={{ padding: '3px', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd' }}>
+                        <input type="number" min="0" inputMode="decimal" value={rows[prefix].weight}
+                          onChange={e => setRows(r => ({ ...r, [prefix]: { ...r[prefix], weight: e.target.value } }))}
+                          style={{ width: '100%', textAlign: 'center', padding: '5px 2px', borderRadius: 4, border: '1px solid #bbb', fontSize: 13, boxSizing: 'border-box' }} />
+                      </td>
+                      <td style={{ padding: '3px', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd' }}>
+                        <input type="number" min="0" inputMode="numeric" value={rows[prefix].reps}
+                          onChange={e => setRows(r => ({ ...r, [prefix]: { ...r[prefix], reps: e.target.value } }))}
+                          style={{ width: '100%', textAlign: 'center', padding: '5px 2px', borderRadius: 4, border: '1px solid #bbb', fontSize: 13, boxSizing: 'border-box' }} />
+                      </td>
+                      <td style={{ padding: '4px', textAlign: 'center', color: rows[prefix].score >= 100 ? '#27ae60' : '#d9534f', fontWeight: 600, borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd', fontSize: 13 }}>
+                        {rows[prefix].score.toFixed(1)}
+                      </td>
+                      <td style={{ padding: '4px', textAlign: 'center', color: '#555', borderBottom: '1px solid #ddd', fontSize: 13 }}>
+                        {maxWeights[prefix] || 0}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 10, padding: '8px 12px', background: '#fff8f8', borderRadius: 6, border: '1px solid #f5c6c6' }}>
+              <span style={{ fontSize: 12, color: '#888' }}>全平均</span>
+              <span style={{ fontSize: 28, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>{avgScore.toFixed(1)}</span>
+            </div>
+
+            <button onClick={calculate}
+              style={{ width: '100%', marginTop: 10, padding: '13px', background: '#d9534f', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
+              計算
+            </button>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button onClick={() => setConfirm({ message: '今日の記録を保存しますか？', onYes: saveData })}
+                style={{ flex: 1, padding: '9px 4px', background: '#98fb98', border: '1px solid #bbb', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#333' }}>
+                SAVE
+              </button>
+              <button onClick={() => setConfirm({ message: '今日の記録をリセットしますか？', onYes: fullReset })}
+                style={{ flex: 1, padding: '9px 4px', background: '#f0f0f0', border: '1px solid #bbb', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#333' }}>
+                記録リセット
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── グラフタブ ── */}
+        {view === 'graph' && (
+          <div style={{ padding: '4px 0' }}>
+            {!hasHistory ? (
+              <div style={{ textAlign: 'center', padding: '3rem', color: '#888', fontSize: 14 }}>
+                履歴データがありません。<br />記録タブで計算してSAVEしてください。
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 20, background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: '10px' }}>
+                  <canvas ref={totalCanvasRef} />
+                </div>
+                <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: '10px' }}>
+                  <canvas ref={exCanvasRef} />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── オプションタブ ── */}
+        {view === 'option' && (
+          <div style={{ padding: '4px 0' }}>
+
+            {/* 履歴バックアップ */}
+            <div style={{ marginBottom: 20 }}>
+              {sectionHead('履歴のバックアップ・復元')}
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 12px', lineHeight: 1.7 }}>
+                定期的にエクスポートしておくと、ブラウザのデータが消えた場合でも復元できます。
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={exportHistory}
+                  style={{ flex: 1, padding: '10px 4px', background: '#a0c0ff', border: '1px solid #7aa0e0', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#333' }}>
+                  履歴エクスポート
+                </button>
+                <button onClick={() => importFileRef.current.click()}
+                  style={{ flex: 1, padding: '10px 4px', background: '#fff3cd', border: '1px solid #e0c060', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#333' }}>
+                  履歴インポート
+                </button>
+                <input ref={importFileRef} type="file" accept=".txt" onChange={importHistory} style={{ display: 'none' }} />
+              </div>
+            </div>
+
+            {/* データ管理 */}
+            <div style={{ marginBottom: 20 }}>
+              {sectionHead('データ管理')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  ['MAX値リセット', 'MAX値（各種目の自己最高重量）をすべて0に戻します。', 'MAX値をリセットしますか？', maxReset],
+                  ['履歴リセット', '保存されているスコア履歴をすべて削除します。', 'これまでのトレーニング履歴を削除しますか？', historyReset],
+                ].map(([label, desc, msg, fn]) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fafafa', border: '1px solid #ddd', borderRadius: 8, padding: '10px 14px' }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>{label}</div>
+                      <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{desc}</div>
+                    </div>
+                    <button onClick={() => setConfirm({ message: msg, onYes: fn })}
+                      style={{ padding: '7px 16px', background: '#f0f0f0', border: '1px solid #bbb', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#c0392b', whiteSpace: 'nowrap', marginLeft: 12 }}>
+                      {label}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* アプリ説明 */}
+            <div>
+              {sectionHead('アプリの説明')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[
+                  ['データの保存場所', 'トレーニング記録・MAX値はすべてこのブラウザのlocalStorageに保存されます。ブラウザのデータを消去するとデータも消えるため、定期的に履歴エクスポートでバックアップをとることをおすすめします。'],
+                  ['MAX値の算出', 'MAX値は各種目の自己最高重量を記録します。10回以上こなした重量が現在のMAX値を超えた場合に自動で更新されます。初回入力時はその重量がそのままMAX値になります。'],
+                  ['スコアの算出', 'スコアは「((使用重量 × (1 + (回数 ÷ 30))) ÷ (MAX値 × 3.9)) × 100」で計算されます。セットを重ねるごとにスコアが積み上がり、1日の合計100点以上が目標です。'],
+                ].map(([title, body]) => (
+                  <div key={title} style={{ background: '#fff8f8', border: '1px solid #f5c6c6', borderRadius: 8, padding: '12px 14px' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#d9534f', marginBottom: 6 }}>{title}</div>
+                    <div style={{ fontSize: 12, color: '#555', lineHeight: 1.8 }}>{body}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<TrainingApp />);
+</script>
+</body>
+</html>
