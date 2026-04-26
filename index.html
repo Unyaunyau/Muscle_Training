@@ -7,6 +7,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>.scroll-picker::-webkit-scrollbar{display:none}</style>
 </head>
 <body style="margin:0;background:url('BG.png') center/cover no-repeat fixed;">
 <div id="root"></div>
@@ -48,6 +49,45 @@ const saveToStorage = (data) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 };
 
+function ScrollPicker({ value, onChange, max = 200, unit = '' }) {
+  const items = Array.from({ length: max + 1 }, (_, i) => i);
+  const itemHeight = 44;
+  const listRef = useRef(null);
+  const scrollTimer = useRef(null);
+
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.scrollTop = (Number(value) || 0) * itemHeight;
+    }
+  }, []);
+
+  const handleScroll = () => {
+    clearTimeout(scrollTimer.current);
+    scrollTimer.current = setTimeout(() => {
+      if (!listRef.current) return;
+      const idx = Math.max(0, Math.min(Math.round(listRef.current.scrollTop / itemHeight), items.length - 1));
+      listRef.current.scrollTop = idx * itemHeight;
+      onChange(items[idx]);
+    }, 150);
+  };
+
+  return (
+    <div style={{ position: 'relative', height: itemHeight * 5, overflow: 'hidden', borderRadius: 8, background: '#f9f9f9' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: itemHeight * 2, background: 'linear-gradient(to bottom, rgba(255,255,255,0.95), rgba(255,255,255,0))', pointerEvents: 'none', zIndex: 2 }} />
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: itemHeight * 2, background: 'linear-gradient(to top, rgba(255,255,255,0.95), rgba(255,255,255,0))', pointerEvents: 'none', zIndex: 2 }} />
+      <div style={{ position: 'absolute', top: itemHeight * 2, height: itemHeight, left: 0, right: 0, background: 'rgba(100,200,150,0.15)', borderTop: '1px solid #aed6b8', borderBottom: '1px solid #aed6b8', pointerEvents: 'none', zIndex: 1 }} />
+      <div ref={listRef} className="scroll-picker" onScroll={handleScroll}
+        style={{ height: '100%', overflowY: 'scroll', scrollSnapType: 'y mandatory', paddingTop: itemHeight * 2, paddingBottom: itemHeight * 2, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {items.map(item => (
+          <div key={item} style={{ height: itemHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', scrollSnapAlign: 'center', fontSize: 22, fontWeight: 600, color: '#222' }}>
+            {item}{unit}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TrainingApp() {
   const [rows, setRows] = useState(() => Object.fromEntries(EXERCISES.map(([k]) => [k, initRow()])));
   const [maxWeights, setMaxWeights] = useState(() => Object.fromEntries(EXERCISES.map(([k]) => [k, 0])));
@@ -56,6 +96,7 @@ function TrainingApp() {
   const [history, setHistory] = useState({});
   const [toast, setToast] = useState('');
   const [confirm, setConfirm] = useState(null);
+  const [picker, setPicker] = useState(null);
 
   const totalCanvasRef = useRef(null);
   const exCanvasRef = useRef(null);
@@ -266,9 +307,35 @@ function TrainingApp() {
             <p style={{ fontSize: 15, color: '#222', margin: '0 0 20px', fontWeight: 500 }}>{confirm.message}</p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
               <button onClick={() => { confirm.onYes(); setConfirm(null); }}
-                style={{ padding: '8px 28px', background: '#d9534f', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>はい</button>
+                style={{ padding: '8px 28px', backgroundImage: "url('Button.png')", backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: 14, fontWeight: 700, cursor: 'pointer', color: '#7a1010', filter: 'hue-rotate(120deg) saturate(1.3)' }}>はい</button>
               <button onClick={() => setConfirm(null)}
-                style={{ padding: '8px 28px', background: '#f0f0f0', color: '#333', border: '1px solid #bbb', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>いいえ</button>
+                style={{ padding: '8px 28px', backgroundImage: "url('Button.png')", backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: 14, fontWeight: 600, cursor: 'pointer', color: '#4a4a4a', filter: 'saturate(0.3) brightness(0.85)' }}>いいえ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {picker && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 2000 }}>
+          <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', width: '100%', maxWidth: 480, padding: '20px 20px 36px' }}>
+            <div style={{ textAlign: 'center', fontSize: 14, color: '#555', marginBottom: 16, fontWeight: 600 }}>
+              {EXERCISES.find(([k]) => k === picker.prefix)?.[1]}　{picker.field === 'weight' ? '重量 (kg)' : '回数'}
+            </div>
+            <ScrollPicker
+              value={picker.value}
+              onChange={(v) => setPicker(p => ({ ...p, value: v }))}
+              max={200}
+              unit={picker.field === 'weight' ? 'kg' : '回'}
+            />
+            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+              <button onClick={() => setPicker(null)}
+                style={{ flex: 1, padding: '13px', backgroundImage: "url('Button.png')", backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: 15, fontWeight: 700, cursor: 'pointer', color: '#4a4a4a', filter: 'saturate(0.3) brightness(0.85)' }}>
+                キャンセル
+              </button>
+              <button onClick={() => { setRows(r => ({ ...r, [picker.prefix]: { ...r[picker.prefix], [picker.field]: String(picker.value) } })); setPicker(null); }}
+                style={{ flex: 1, padding: '13px', backgroundImage: "url('Button.png')", backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat', backgroundColor: 'transparent', border: 'none', borderRadius: 0, fontSize: 15, fontWeight: 700, cursor: 'pointer', color: '#0a3a6a', filter: 'hue-rotate(180deg) saturate(1.2)' }}>
+                決定
+              </button>
             </div>
           </div>
         </div>
@@ -307,15 +374,17 @@ function TrainingApp() {
                   {EXERCISES.map(([prefix, name], idx) => (
                     <tr key={prefix} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
                       <td style={{ padding: '4px 6px', color: '#222', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd', fontWeight: 500, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</td>
-                      <td style={{ padding: '3px', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd' }}>
-                        <input type="number" min="0" inputMode="decimal" value={rows[prefix].weight}
-                          onChange={e => setRows(r => ({ ...r, [prefix]: { ...r[prefix], weight: e.target.value } }))}
-                          style={{ width: '100%', textAlign: 'center', padding: '5px 2px', borderRadius: 4, border: '1px solid #bbb', fontSize: 13, boxSizing: 'border-box' }} />
+                      <td onClick={() => setPicker({ prefix, field: 'weight', value: parseFloat(rows[prefix].weight) || 0 })}
+                        style={{ padding: '3px', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd', cursor: 'pointer' }}>
+                        <div style={{ width: '100%', textAlign: 'center', padding: '5px 2px', borderRadius: 4, border: '1px solid #bbb', fontSize: 13, boxSizing: 'border-box', background: '#f9fff9', minHeight: 26, lineHeight: '18px' }}>
+                          {rows[prefix].weight !== '' ? rows[prefix].weight : '－'}
+                        </div>
                       </td>
-                      <td style={{ padding: '3px', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd' }}>
-                        <input type="number" min="0" inputMode="numeric" value={rows[prefix].reps}
-                          onChange={e => setRows(r => ({ ...r, [prefix]: { ...r[prefix], reps: e.target.value } }))}
-                          style={{ width: '100%', textAlign: 'center', padding: '5px 2px', borderRadius: 4, border: '1px solid #bbb', fontSize: 13, boxSizing: 'border-box' }} />
+                      <td onClick={() => setPicker({ prefix, field: 'reps', value: parseFloat(rows[prefix].reps) || 0 })}
+                        style={{ padding: '3px', borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd', cursor: 'pointer' }}>
+                        <div style={{ width: '100%', textAlign: 'center', padding: '5px 2px', borderRadius: 4, border: '1px solid #bbb', fontSize: 13, boxSizing: 'border-box', background: '#f9fff9', minHeight: 26, lineHeight: '18px' }}>
+                          {rows[prefix].reps !== '' ? rows[prefix].reps : '－'}
+                        </div>
                       </td>
                       <td style={{ padding: '4px', textAlign: 'center', color: rows[prefix].score >= 100 ? '#27ae60' : '#d9534f', fontWeight: 600, borderBottom: '1px solid #ddd', borderRight: '1px solid #ddd', fontSize: 13 }}>
                         {rows[prefix].score.toFixed(1)}
