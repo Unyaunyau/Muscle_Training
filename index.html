@@ -104,6 +104,10 @@ function TrainingApp() {
   const [toast, setToast] = useState('');
   const [confirm, setConfirm] = useState(null);
   const [picker, setPicker] = useState(null);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerStarted, setTimerStarted] = useState(false);
+  const timerIntervalRef = useRef(null);
 
   const totalCanvasRef = useRef(null);
   const exCanvasRef = useRef(null);
@@ -120,6 +124,22 @@ function TrainingApp() {
       showToast('データをロードしました');
     }
   }, []);
+
+  useEffect(() => {
+    if (totalScore > 0 && !timerStarted) {
+      setTimerStarted(true);
+      setTimerRunning(true);
+    }
+  }, [totalScore]);
+
+  useEffect(() => {
+    if (timerRunning) {
+      timerIntervalRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+    } else {
+      clearInterval(timerIntervalRef.current);
+    }
+    return () => clearInterval(timerIntervalRef.current);
+  }, [timerRunning]);
 
   useEffect(() => {
     if (view === 'graph') {
@@ -153,6 +173,7 @@ function TrainingApp() {
     const data = { max_weights: maxWeights, history: newHistory };
     saveToStorage(data);
     setHistory(newHistory);
+    setTimerRunning(false);
     showToast(`${today} のデータを保存しました`);
   };
 
@@ -166,8 +187,8 @@ function TrainingApp() {
       const reps = parseFloat(newRows[prefix].reps) || 0;
       const curMax = newMax[prefix] || 0;
       if (weight <= 0 || reps <= 0) { total += newRows[prefix].score; continue; }
-      const baseline = (curMax === 0 || weight > curMax) ? weight : curMax;
-      const added = Math.round(((weight * (1 + (reps / 30))) / (baseline * 3.9)) * 100 * 100) / 100;
+      const ratio = (curMax === 0 || weight >= curMax) ? 1 : weight / curMax;
+      const added = Math.round(Math.pow(ratio, 1.7) * (reps / 30) * 100 * 100) / 100;
       const newScore = Math.round((newRows[prefix].score + added) * 100) / 100;
       newRows[prefix] = { ...newRows[prefix], score: newScore };
       total += newScore;
@@ -182,6 +203,9 @@ function TrainingApp() {
   const fullReset = () => {
     setRows(Object.fromEntries(EXERCISES.map(([k]) => [k, initRow()])));
     setTotalScore(0);
+    setTimerSeconds(0);
+    setTimerRunning(false);
+    setTimerStarted(false);
   };
 
   const maxReset = () => {
@@ -288,8 +312,8 @@ function TrainingApp() {
     }
   };
 
-  const avgScore = Math.round((totalScore / EXERCISES.length) * 10) / 10;
-  const scoreColor = avgScore >= 100 ? '#27ae60' : '#d9534f';
+  const scoreColor = totalScore >= 100 ? '#27ae60' : '#d9534f';
+  const formatTime = (s) => `${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒`;
 
   const tabStyle = (v) => ({
     padding: '7px 12px', fontSize: 12, fontWeight: view === v ? 600 : 400, cursor: 'pointer',
@@ -395,9 +419,20 @@ function TrainingApp() {
               </table>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 10, padding: '8px 12px', background: '#fff8f8', borderRadius: 6, border: '1px solid #f5c6c6' }}>
-              <span style={{ fontSize: 12, color: '#888' }}>全平均</span>
-              <span style={{ fontSize: 28, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>{avgScore.toFixed(1)}</span>
+            <div style={{ marginTop: 10, padding: '8px 12px', background: '#fff8f8', borderRadius: 6, border: '1px solid #f5c6c6' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                <span style={{ fontSize: 12, color: '#888' }}>合計スコア</span>
+                <span style={{ fontSize: 28, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>{totalScore.toFixed(1)}</span>
+              </div>
+              {(timerStarted || timerSeconds > 0) && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                  <span style={{ fontSize: 11, color: '#aaa' }}>トレーニング時間</span>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: timerRunning ? '#2980b9' : '#888', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatTime(timerSeconds)}
+                  </span>
+                  {timerRunning && <span style={{ fontSize: 10, color: '#2980b9' }}>●</span>}
+                </div>
+              )}
             </div>
 
             <button onClick={calculate}
